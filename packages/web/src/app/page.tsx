@@ -79,6 +79,21 @@ export default async function Home() {
         <p className="mt-3 text-xs text-muted">户型：客餐厅 + 厨房 + 卧室，开间、进深都能改；墙上的插座、燃气点位可以改成你家实测的高度。</p>
       </section>
 
+      <section>
+        <h2 className="mb-3 mt-7 text-[17px] font-semibold">或者，用你家的户型图</h2>
+        <Link
+          href="/trace"
+          className="flex items-center gap-3 rounded-2xl bg-panel p-4 no-underline shadow-card"
+        >
+          <span className="text-3xl">📐</span>
+          <span className="flex-1">
+            <strong className="block">上传户型图，自动识别墙和房间</strong>
+            <span className="text-[13px] text-muted">售楼处、中介给的平面图都可以。定好比例、点一下墙，几分钟生成你家的 3D 户型；图片只在你的浏览器里处理。</span>
+          </span>
+          <span className="text-muted">›</span>
+        </Link>
+      </section>
+
       {plans.length > 0 && (
         <section>
           <h2 className="mb-3 mt-7 text-[17px] font-semibold">我的方案</h2>
