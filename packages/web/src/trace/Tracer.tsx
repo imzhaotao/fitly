@@ -569,50 +569,55 @@ export default function Tracer() {
                 </div>
               )}
 
-              {selRoom >= 0 && roomMeta[selRoom] && (
-                <div className="flex flex-col gap-2 rounded-xl bg-soft p-2.5">
-                  <strong>房间 · {areaOf(rooms[selRoom]).toFixed(2)}㎡</strong>
-                  <input
-                    className={inputClass}
-                    value={roomMeta[selRoom].name}
-                    maxLength={12}
-                    onChange={(e) => setRoomMeta((m) => m.map((x, i) => (i === selRoom ? { ...x, name: e.target.value } : x)))}
-                  />
-                  <div className="flex flex-wrap gap-1.5">
-                    {SPACE_OPTIONS.map((o) => (
-                      <Chip
-                        key={o.space}
-                        on={roomMeta[selRoom].space === o.space && !roomMeta[selRoom].skip}
-                        onClick={() =>
-                          setRoomMeta((m) =>
-                            m.map((x, i) => (i === selRoom ? { space: o.space, name: x.name.startsWith('房间') || SPACE_OPTIONS.some((y) => y.label === x.name) ? o.label : x.name } : x)),
-                          )
-                        }
+              {/* 房间列表：每一行直接改名字、选类型；点户型图上的房间会高亮对应行 */}
+              <div className="flex flex-col gap-1.5">
+                <span className="text-xs text-muted">识别到的房间：直接改名字和类型，面积可以和图上标的对一对</span>
+                {rooms.map((r, i) => {
+                  const m = roomMeta[i];
+                  if (!m) return null;
+                  const setMeta = (patch: Partial<RoomMeta>) => setRoomMeta((all) => all.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+                  return (
+                    <div
+                      key={r.id}
+                      ref={(el) => {
+                        if (el && selRoom === i) el.scrollIntoView({ block: 'nearest' });
+                      }}
+                      className={cn('flex items-center gap-1.5 rounded-lg px-1.5 py-1', selRoom === i ? 'bg-soft ring-1 ring-accent' : 'bg-transparent')}
+                      onFocusCapture={() => setSel({ kind: 'room', index: i })}
+                    >
+                      <input
+                        className={cn(inputClass, 'w-0 px-2 py-1.5', m.skip && 'text-muted line-through')}
+                        value={m.name}
+                        maxLength={12}
+                        aria-label="房间名字"
+                        onChange={(e) => setMeta({ name: e.target.value })}
+                        disabled={m.skip}
+                      />
+                      <select
+                        className="w-[76px] flex-none rounded-lg border border-line bg-field px-1 py-1.5 text-base desk:text-[13px]"
+                        aria-label="房间类型"
+                        value={m.skip ? 'skip' : m.space}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          if (v === 'skip') return setMeta({ skip: true });
+                          const label = SPACE_OPTIONS.find((o) => o.space === v)!.label;
+                          // 名字还是默认名时，跟着类型一起改
+                          const isDefault = m.name.startsWith('房间') || SPACE_OPTIONS.some((o) => o.label === m.name);
+                          setMeta({ space: v as Space, skip: false, name: isDefault ? label : m.name });
+                        }}
                       >
-                        {o.label}
-                      </Chip>
-                    ))}
-                    <Chip on={!!roomMeta[selRoom].skip} onClick={() => setRoomMeta((m) => m.map((x, i) => (i === selRoom ? { ...x, skip: !x.skip } : x)))}>
-                      不是房间
-                    </Chip>
-                  </div>
-                </div>
-              )}
-
-              <div className="flex flex-col gap-1">
-                <span className="text-xs text-muted">识别到的房间（和图上标的面积对一对）</span>
-                {rooms.map((r, i) => (
-                  <button
-                    key={r.id}
-                    className={cn('flex justify-between rounded-lg border-0 px-2 py-1 text-left', selRoom === i ? 'bg-soft' : 'bg-transparent', roomMeta[i]?.skip && 'text-muted line-through')}
-                    onClick={() => setSel({ kind: 'room', index: i })}
-                  >
-                    <span>{roomMeta[i]?.name}</span>
-                    <span className="text-muted">{areaOf(r).toFixed(2)}㎡</span>
-                  </button>
-                ))}
+                        {SPACE_OPTIONS.map((o) => (
+                          <option key={o.space} value={o.space}>
+                            {o.label}
+                          </option>
+                        ))}
+                        <option value="skip">不是房间</option>
+                      </select>
+                      <span className="w-[58px] flex-none text-right text-xs text-muted">{areaOf(r).toFixed(2)}㎡</span>
+                    </div>
+                  );
+                })}
               </div>
-
             </>
           )}
           {err && <p className="m-0 text-[13px] text-danger">{err}</p>}
