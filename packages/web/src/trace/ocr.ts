@@ -1,6 +1,6 @@
 'use client';
 
-import type { TraceRoom } from '@fitly/layout-engine';
+import { combineScales, measureDimension, type DimHit, type TraceRoom } from '@fitly/layout-engine';
 import { parseRoomLabel, type LabelGuess } from './labels';
 
 /** 识别时把文字以外的东西（木地板纹理、瓷砖）过滤掉：亮度低于这个值的才当作字 */
@@ -138,4 +138,57 @@ export async function readRoomLabels(data: ImageData, rooms: TraceRoom[], onProg
   }
   onProgress?.(rooms.length, rooms.length);
   return out;
+}
+
+/**
+ * 读四周的尺寸数字自动定比例：只认数字，横向标注直接识别，竖向标注把图顺时针转 90° 再识别。
+ * 每个数字找到所属尺寸线和两端刻度，按“数字 ÷ 刻度间距”算每像素毫米数，横竖分别取中位数。
+ */
+export async function readDimensions(data: ImageData): Promise<{ sx?: number; sy?: number; hits: DimHit[] }> {
+  const worker = await getWorker();
+  const { width: W, height: H } = data;
+  const src = document.createElement('canvas');
+  src.width = W;
+  src.height = H;
+  src.getContext('2d')!.putImageData(data, 0, 0);
+  const rot = document.createElement('canvas');
+  rot.width = H;
+  rot.height = W;
+  const rg = rot.getContext('2d')!;
+  rg.translate(H, 0);
+  rg.rotate(Math.PI / 2);
+  rg.drawImage(src, 0, 0);
+
+  const lumAt = (x: number, y: number) => {
+    const xi = Math.max(0, Math.min(W - 1, Math.round(x)));
+    const yi = Math.max(0, Math.min(H - 1, Math.round(y)));
+    const i = (yi * W + xi) * 4;
+    const d = data.data;
+    return 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+  };
+
+  await worker.setParameters({ tessedit_char_whitelist: '0123456789' });
+  const hits: DimHit[] = [];
+  try {
+    for (const pass of ['h', 'v'] as const) {
+      const { data: res } = await worker.recognize(pass === 'h' ? src : rot, {}, { blocks: true });
+      for (const b of res.blocks ?? [])
+        for (const p of b.paragraphs)
+          for (const l of p.lines)
+            for (const wd of l.words) {
+              const v = Number(wd.text);
+              if (!(v >= 300 && v <= 30000) || wd.confidence < 50) continue;
+              const bb = wd.bbox;
+              // 转过的图：x' = H-1-y, y' = x  →  y = H-1-x', x = y'
+              const box = pass === 'h' ? bb : { x0: bb.y0, x1: bb.y1, y0: H - 1 - bb.x1, y1: H - 1 - bb.x0 };
+              const hit = measureDimension(lumAt, W, H, box, v, pass);
+              if (hit) hits.push(hit);
+            }
+    }
+  } finally {
+    await worker.setParameters({ tessedit_char_whitelist: '' });
+  }
+  const h = combineScales(hits.filter((x) => x.dir === 'h'));
+  const v = combineScales(hits.filter((x) => x.dir === 'v'));
+  return { sx: h?.mmPerPx, sy: v?.mmPerPx, hits: [...(h?.used ?? []), ...(v?.used ?? [])] };
 }

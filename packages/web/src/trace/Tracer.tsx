@@ -10,6 +10,7 @@ import {
   type TraceGap,
   type TraceRoom,
   type TraceWall,
+  type DimHit,
 } from '@fitly/layout-engine';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -18,7 +19,7 @@ import { Button, Chip, cn, inputClass, TextButton } from '@/ui';
 import { TopBar } from '@/ui/TopBar';
 import { buildPlanFromTrace, defaultGapSide, type RoomMeta, type Scale } from './buildPlan';
 import { areaDiff } from './labels';
-import { readRoomLabels } from './ocr';
+import { readDimensions, readRoomLabels } from './ocr';
 
 type Step = 'upload' | 'scaleX' | 'scaleY' | 'wall' | 'edit';
 type Tool = 'select' | 'add';
@@ -116,6 +117,7 @@ export default function Tracer() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [name, setName] = useState('我家 · 上传户型');
+  const [dims, setDims] = useState<{ state: 'idle' | 'loading' | 'error'; hits: DimHit[]; note?: string }>({ state: 'idle', hits: [] });
   const [ocr, setOcr] = useState<{ state: 'idle' | 'loading' | 'done' | 'error'; done?: number; total?: number }>({ state: 'idle' });
   const boxRef = useRef<HTMLDivElement>(null);
 
@@ -309,6 +311,39 @@ export default function Tracer() {
     }
   };
 
+  /** 读图上的尺寸数字自动定比例 */
+  const runDims = async () => {
+    if (!img) return;
+    setDims({ state: 'loading', hits: [] });
+    setErr(null);
+    try {
+      const { sx, sy, hits } = await readDimensions(img.data);
+      const nh = hits.filter((x) => x.dir === 'h').length;
+      const nv = hits.filter((x) => x.dir === 'v').length;
+      if (sx && sy) {
+        setScale({ sx, sy });
+        const stretch = Math.abs(sx - sy) / Math.min(sx, sy);
+        setDims({
+          state: 'idle',
+          hits,
+          note: `已按 ${nh} 个横向、${nv} 个纵向尺寸定好比例（绿色是用到的尺寸）。${stretch > 0.03 ? `这张图横竖被拉伸了约 ${Math.round(stretch * 100)}%，已分别处理。` : ''}`,
+        });
+        setPts([]);
+        setStep('wall');
+      } else if (sx || sy) {
+        const s0 = (sx ?? sy)!;
+        setScale({ sx: s0, sy: s0 });
+        setDims({ state: 'idle', hits, note: `只读到${sx ? '横向' : '纵向'}尺寸，请再手动定一下${sx ? '纵向' : '横向'}，确定没拉伸也可以跳过。` });
+        setPts([]);
+        setStep(sx ? 'scaleY' : 'scaleX');
+      } else {
+        setDims({ state: 'error', hits: [], note: '没读到可用的尺寸数字，请手动点两端定比例。' });
+      }
+    } catch {
+      setDims({ state: 'error', hits: [], note: '识别失败（可能是网络问题），请手动定比例。' });
+    }
+  };
+
   /** 识别图上的房间名和面积，填进还没手动改过的房间 */
   const runOcr = async () => {
     if (!img) return;
@@ -469,6 +504,11 @@ export default function Tracer() {
                   />
                 )}
                 {addStart && <circle cx={addStart.x} cy={addStart.y} r={5} fill="#2f6fed" />}
+                {step !== 'edit' &&
+                  dims.hits.map((hh, i) => {
+                    const [x1, y1, x2, y2] = hh.dir === 'h' ? [hh.a0, hh.c, hh.a1, hh.c] : [hh.c, hh.a0, hh.c, hh.a1];
+                    return <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke="#2f9e6a" strokeWidth={Math.max(3, img.w / 300)} strokeLinecap="round" opacity={0.85} />;
+                  })}
               </svg>
             </div>
           )}
@@ -479,6 +519,13 @@ export default function Tracer() {
           <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto overscroll-contain p-3.5">
           <p className="m-0 text-[13px] text-muted">{hint[step]}</p>
 
+          {dims.note && <p className={cn('m-0 rounded-lg px-2.5 py-1.5 text-[13px]', dims.state === 'error' ? 'bg-danger-soft text-danger' : 'bg-ok-soft text-ok')}>{dims.note}</p>}
+          {step === 'scaleX' && (
+            <Button variant="primary" disabled={dims.state === 'loading'} onClick={runDims}>
+              {dims.state === 'loading' ? '正在读图上的尺寸…' : '自动读尺寸定比例（推荐）'}
+            </Button>
+          )}
+          {step === 'scaleX' && <p className="m-0 text-xs text-muted">读不准或图上没标尺寸时，按下面的方法手动定。首次识别需下载约 5MB 字库，图片只在本机处理。</p>}
           {(step === 'scaleX' || step === 'scaleY') && (
             <>
               <div className="flex items-center gap-2">

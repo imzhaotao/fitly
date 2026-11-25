@@ -406,3 +406,113 @@ export function classifyGap(
   // 没有门的特征就当窗（推拉门、门洞由用户点一下改）
   return best;
 }
+
+// ---------------- 尺寸标注 → 自动定比例 ----------------
+
+export interface DimBox {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
+export interface DimHit {
+  value: number;
+  dir: 'h' | 'v';
+  /** 两个端点刻度的位置（沿尺寸线方向，像素） */
+  a0: number;
+  a1: number;
+  /** 尺寸线位置（垂直方向，像素） */
+  c: number;
+  /** 每像素多少毫米 */
+  mmPerPx: number;
+}
+
+const DIM_DARK = 160;
+
+/**
+ * 给一个尺寸数字（及其在图上的位置），找它所属的尺寸线和两端刻度，换算比例。
+ * 户型图的尺寸标注通常是：数字旁一条细线，两端各有一个短刻度。
+ * dir='v' 表示竖向标注（文字竖排），按转置后的坐标同样处理。
+ */
+export function measureDimension(
+  lumAt: (x: number, y: number) => number,
+  w: number,
+  h: number,
+  box: DimBox,
+  value: number,
+  dir: 'h' | 'v',
+): DimHit | null {
+  // 统一成“横向”来处理：竖向时交换 x / y
+  const L = dir === 'h' ? lumAt : (x: number, y: number) => lumAt(y, x);
+  const W = dir === 'h' ? w : h;
+  const H = dir === 'h' ? h : w;
+  const b = dir === 'h' ? box : { x0: box.y0, y0: box.x0, x1: box.y1, y1: box.x1 };
+  const dark = (x: number, y: number) => x >= 0 && y >= 0 && x < W && y < H && L(x, y) < DIM_DARK;
+  const th = Math.max(4, b.y1 - b.y0);
+  const cx = Math.round((b.x0 + b.x1) / 2);
+  const textW = b.x1 - b.x0;
+
+  // 1. 尺寸线：数字上下 2.5 个字高内，穿过数字中线、最长的一段深色横线
+  let bestY = -1;
+  let bestRun: [number, number] = [0, 0];
+  for (let y = Math.round(b.y0 - th * 2.5); y <= Math.round(b.y1 + th * 2.5); y++) {
+    if (y > b.y0 + 1 && y < b.y1 - 1) continue;
+    if (!dark(cx, y)) continue;
+    let l = cx;
+    let r = cx;
+    let gap = 0;
+    while (l > 0 && gap <= 2) gap = dark(--l, y) ? 0 : gap + 1;
+    gap = 0;
+    while (r < W - 1 && gap <= 2) gap = dark(++r, y) ? 0 : gap + 1;
+    if (r - l > bestRun[1] - bestRun[0]) {
+      bestRun = [l, r];
+      bestY = y;
+    }
+  }
+  if (bestY < 0 || bestRun[1] - bestRun[0] < textW * 1.2) return null;
+
+  // 2. 刻度：沿尺寸线往两边找，垂直方向有一段连续深色的位置（跳过数字本身所在的范围）
+  const tickAt = (x: number) => {
+    let up = 0;
+    let down = 0;
+    for (let k = 3; k <= 22; k++) {
+      if (dark(x, bestY - k)) up++;
+      if (dark(x, bestY + k)) down++;
+    }
+    return Math.max(up, down) >= 10;
+  };
+  const skip0 = b.x0 - 3;
+  const skip1 = b.x1 + 3;
+  let left = -1;
+  for (let x = cx; x >= bestRun[0]; x--) {
+    if (x >= skip0 && x <= skip1) continue;
+    if (tickAt(x)) {
+      // 刻度有 2px 宽，取中心
+      left = tickAt(x - 1) ? x - 0.5 : x;
+      break;
+    }
+  }
+  let right = -1;
+  for (let x = cx; x <= bestRun[1]; x++) {
+    if (x >= skip0 && x <= skip1) continue;
+    if (tickAt(x)) {
+      right = tickAt(x + 1) ? x + 0.5 : x;
+      break;
+    }
+  }
+  if (left < 0 || right < 0) return null;
+  const span = right - left;
+  if (span < textW) return null;
+  return { value, dir, a0: left, a1: right, c: bestY, mmPerPx: value / span };
+}
+
+/** 多个尺寸算出的比例取中位数；与中位数偏差超过 5% 的视为配错的数字剔除 */
+export function combineScales(hits: DimHit[]): { mmPerPx: number; used: DimHit[] } | null {
+  if (!hits.length) return null;
+  const sorted = [...hits].sort((a, b) => a.mmPerPx - b.mmPerPx);
+  const med = sorted[Math.floor(sorted.length / 2)].mmPerPx;
+  const used = hits.filter((h) => Math.abs(h.mmPerPx - med) / med <= 0.05);
+  const mean = used.reduce((s, h) => s + h.mmPerPx, 0) / used.length;
+  return { mmPerPx: mean, used };
+}

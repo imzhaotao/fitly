@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bandsToWalls, classifyGap, detectBands, detectRooms, type Mask } from '../src';
+import { bandsToWalls, classifyGap, combineScales, detectBands, detectRooms, measureDimension, type Mask } from '../src';
 
 /** 合成户型：外框 20..380 × 20..280，墙厚 10；x=200 处一道隔墙，中间留 40px 门洞；上墙留 60px 窗 */
 function synth() {
@@ -80,5 +80,43 @@ describe('户型图描图', () => {
     expect(areas[0]).toBeGreaterThan(165 * 240 * 0.95);
     expect(areas[1]).toBeLessThan(175 * 240 * 1.05);
     for (const r of rooms) expect(r.polygon.length).toBe(4);
+  });
+});
+
+describe('尺寸标注自动定比例', () => {
+  /** 画一条带两端刻度的尺寸线，数字放在刻度一侧；数字的笔画用几道竖线模拟 */
+  function dimImage(dir: 'h' | 'v') {
+    const w = 400;
+    const h = 300;
+    const lum = new Float32Array(w * h).fill(245);
+    const set = (x: number, y: number) => {
+      const [px, py] = dir === 'h' ? [x, y] : [y, x];
+      if (px >= 0 && py >= 0 && px < w && py < h) lum[py * w + px] = 90;
+    };
+    for (let x = 50; x <= 250; x++) for (const y of [40, 41]) set(x, y); // 尺寸线
+    for (const x of [50, 51, 249, 250]) for (let y = 42; y <= 60; y++) set(x, y); // 两端刻度
+    for (const x of [140, 146, 152, 158]) for (let y = 48; y <= 58; y++) set(x, y); // “数字”笔画
+    const box = dir === 'h' ? { x0: 138, y0: 47, x1: 160, y1: 59 } : { x0: 47, y0: 138, x1: 59, y1: 160 };
+    return { lumAt: (x: number, y: number) => lum[Math.round(y) * w + Math.round(x)] ?? 255, w, h, box };
+  }
+
+  it('横向：找到尺寸线和两端刻度，跳过数字笔画', () => {
+    const { lumAt, w, h, box } = dimImage('h');
+    const r = measureDimension(lumAt, w, h, box, 2000, 'h')!;
+    expect(r.a1 - r.a0).toBeCloseTo(199, 0);
+    expect(r.mmPerPx).toBeCloseTo(2000 / 199, 1);
+  });
+
+  it('竖向标注同样适用', () => {
+    const { lumAt, w, h, box } = dimImage('v');
+    const r = measureDimension(lumAt, w, h, box, 2000, 'v')!;
+    expect(r.a1 - r.a0).toBeCloseTo(199, 0);
+  });
+
+  it('合并多个尺寸时剔除配错的数字', () => {
+    const mk = (mmPerPx: number) => ({ value: 0, dir: 'h' as const, a0: 0, a1: 0, c: 0, mmPerPx });
+    const r = combineScales([mk(11.5), mk(11.52), mk(11.55), mk(23)])!;
+    expect(r.used).toHaveLength(3);
+    expect(r.mmPerPx).toBeCloseTo(11.52, 1);
   });
 });
