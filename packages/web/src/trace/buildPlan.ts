@@ -5,6 +5,10 @@ export interface RoomMeta {
   space: Space;
   name: string;
   skip?: boolean;
+  /** 用户手动改过名字或类型：自动识别不再覆盖 */
+  edited?: boolean;
+  /** 从图上识别到的标注面积（㎡），用于核对比例 */
+  labeledArea?: number;
 }
 
 export interface Scale {

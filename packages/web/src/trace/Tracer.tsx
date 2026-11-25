@@ -17,6 +17,8 @@ import { useCallback, useMemo, useRef, useState, type PointerEvent as ReactPoint
 import { Button, Chip, cn, inputClass, TextButton } from '@/ui';
 import { TopBar } from '@/ui/TopBar';
 import { buildPlanFromTrace, defaultGapSide, type RoomMeta, type Scale } from './buildPlan';
+import { areaDiff } from './labels';
+import { readRoomLabels } from './ocr';
 
 type Step = 'upload' | 'scaleX' | 'scaleY' | 'wall' | 'edit';
 type Tool = 'select' | 'add';
@@ -114,6 +116,7 @@ export default function Tracer() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [name, setName] = useState('我家 · 上传户型');
+  const [ocr, setOcr] = useState<{ state: 'idle' | 'loading' | 'done' | 'error'; done?: number; total?: number }>({ state: 'idle' });
   const boxRef = useRef<HTMLDivElement>(null);
 
   const s = (scale.sx + scale.sy) / 2;
@@ -305,6 +308,39 @@ export default function Tracer() {
       setBusy(false);
     }
   };
+
+  /** 识别图上的房间名和面积，填进还没手动改过的房间 */
+  const runOcr = async () => {
+    if (!img) return;
+    setOcr({ state: 'loading' });
+    try {
+      const labels = await readRoomLabels(img.data, rooms, (done, total) => setOcr({ state: 'loading', done, total }));
+      setRoomMeta((all) =>
+        all.map((m, i) => {
+          const l = labels[i];
+          if (!l) return m;
+          const next = { ...m, labeledArea: l.area ?? m.labeledArea };
+          if (!m.edited && l.name && l.space) Object.assign(next, { name: l.name, space: l.space, skip: false });
+          return next;
+        }),
+      );
+      setOcr({ state: 'done' });
+    } catch {
+      setOcr({ state: 'error' });
+    }
+  };
+
+  // 多数房间的面积都和图上对不上，多半是比例定错了
+  const scaleWarning = useMemo(() => {
+    const diffs = rooms
+      .map((r, i) => areaDiff((polygonArea(r.polygon) * scale.sx * scale.sy) / 1e6, roomMeta[i]?.labeledArea))
+      .filter((d): d is number => d != null)
+      .map(Math.abs)
+      .sort((a, b) => a - b);
+    if (diffs.length < 2) return null;
+    const med = diffs[Math.floor(diffs.length / 2)];
+    return med > 0.15 ? `多数房间面积和图上相差 ${Math.round(med * 100)}% 以上，可能比例定错了，建议点“重新识别”前先回去重定比例。` : null;
+  }, [rooms, roomMeta, scale]);
 
   // ---------- 渲染 ----------
 
@@ -571,11 +607,20 @@ export default function Tracer() {
 
               {/* 房间列表：每一行直接改名字、选类型；点户型图上的房间会高亮对应行 */}
               <div className="flex flex-col gap-1.5">
-                <span className="text-xs text-muted">识别到的房间：直接改名字和类型，面积可以和图上标的对一对</span>
+                <div className="flex items-center gap-2">
+                  <span className="flex-1 text-xs text-muted">识别到的房间：直接改名字和类型，面积可以和图上标的对一对</span>
+                  <Button className="h-8 flex-none px-2.5 text-xs" disabled={ocr.state === 'loading'} onClick={runOcr}>
+                    {ocr.state === 'loading' ? (ocr.total ? `识别中 ${ocr.done}/${ocr.total}` : '加载字库…') : '识别图上文字'}
+                  </Button>
+                </div>
+                {ocr.state === 'idle' && <span className="text-xs text-muted">自动读出图上的“主卧 13.54㎡”这类文字来填名字。首次需下载约 5MB 字库，图片仍只在本机识别。</span>}
+                {ocr.state === 'error' && <span className="text-xs text-danger">识别失败（可能是网络问题），可以手动填写。</span>}
+                {scaleWarning && <span className="text-xs text-danger">{scaleWarning}</span>}
                 {rooms.map((r, i) => {
                   const m = roomMeta[i];
                   if (!m) return null;
-                  const setMeta = (patch: Partial<RoomMeta>) => setRoomMeta((all) => all.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+                  const setMeta = (patch: Partial<RoomMeta>) => setRoomMeta((all) => all.map((x, j) => (j === i ? { ...x, ...patch, edited: true } : x)));
+                  const diff = areaDiff(areaOf(r), m.labeledArea);
                   return (
                     <div
                       key={r.id}
@@ -613,7 +658,14 @@ export default function Tracer() {
                         ))}
                         <option value="skip">不是房间</option>
                       </select>
-                      <span className="w-[58px] flex-none text-right text-xs text-muted">{areaOf(r).toFixed(2)}㎡</span>
+                      <span className="flex w-[64px] flex-none flex-col items-end text-xs leading-tight text-muted">
+                        <span>{areaOf(r).toFixed(2)}㎡</span>
+                        {m.labeledArea != null && diff != null && (
+                          <span className={cn(Math.abs(diff) <= 0.08 ? 'text-ok' : Math.abs(diff) <= 0.15 ? 'text-warn-ink' : 'text-danger')}>
+                            图上 {m.labeledArea}
+                          </span>
+                        )}
+                      </span>
                     </div>
                   );
                 })}
