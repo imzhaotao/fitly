@@ -358,7 +358,7 @@ export default function Editor({ planId, initialPlan, canEdit }: { planId: strin
       }}
     >
       <header className="flex min-h-12 flex-none items-center gap-1.5 border-b border-line bg-panel px-2 py-1.5 desk:min-h-[52px] desk:gap-2.5 desk:px-3 desk:py-2">
-        <Link href="/" className="text-lg font-extrabold tracking-wide no-underline">
+        <Link href="/" className="rounded-md text-lg font-extrabold tracking-wide no-underline transition-opacity active:opacity-50">
           Fitly
         </Link>
         <input

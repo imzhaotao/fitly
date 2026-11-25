@@ -395,7 +395,7 @@ export default function Tracer() {
   return (
     <div className="no-callout flex h-dvh flex-col overflow-hidden">
       <TopBar>
-        <Link href="/" className="text-lg font-extrabold tracking-wide no-underline">
+        <Link href="/" className="rounded-md text-lg font-extrabold tracking-wide no-underline transition-opacity active:opacity-50">
           Fitly
         </Link>
         <strong className="min-w-0 flex-1 truncate">{STEP_TITLE[step]}</strong>

@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { Suspense } from 'react';
 import { db } from '@/lib/supabase';
 import { readWorkspace } from '@/lib/workspace';
 import { TEMPLATES } from '@/plan/templates';
@@ -40,8 +41,25 @@ function Thumb({ id }: { id: string }) {
   );
 }
 
-export default async function Home() {
+async function MyPlans() {
   const plans = await myPlans().catch(() => []);
+  if (plans.length === 0) return null;
+  return (
+    <section>
+      <h2 className="mb-3 mt-7 text-[17px] font-semibold">我的方案</h2>
+      <ul className="m-0 list-none divide-y divide-line rounded-xl bg-panel p-0">
+        {plans.map((p) => (
+          <li key={p.id} className="flex justify-between gap-3 px-3.5 py-3">
+            <Link href={`/plan/${p.id}`}>{p.name}</Link>
+            <span className="text-xs text-muted">{new Date(p.updated_at).toLocaleString('zh-CN', { hour12: false })}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+export default function Home() {
   return (
     <div className="mx-auto max-w-[980px] px-4 pb-12 pt-5">
       <header className="flex items-center justify-between">
@@ -51,12 +69,27 @@ export default async function Home() {
       <section className="pb-5 pt-9">
         <h1 className="mb-3 mt-0 text-[clamp(26px,5vw,40px)] font-bold tracking-tight">买之前，先在你家 3D 试一下</h1>
         <p className="m-0 max-w-[620px] text-[15px] text-muted">
-          选一套接近你家的设计模板，改成自家尺寸，拖动沙发、床、冰箱试摆。 挡门、挡插座、过道太窄这些坑，会在你摆的那一刻按你家尺寸算出来。
+          上传你家的户型图，或选一套设计模板改成自家尺寸，拖动沙发、床、冰箱试摆。 挡门、挡插座、过道太窄这些坑，会在你摆的那一刻按你家尺寸算出来。
         </p>
       </section>
 
       <section>
-        <h2 className="mb-3 mt-7 text-[17px] font-semibold">从一套设计模板开始</h2>
+        <h2 className="mb-3 mt-7 text-[17px] font-semibold">用你家的户型图开始</h2>
+        <Link
+          href="/trace"
+          className="flex items-center gap-3 rounded-2xl bg-ink p-4 text-white no-underline shadow-card"
+        >
+          <span className="text-3xl">📐</span>
+          <span className="flex-1">
+            <strong className="block">上传户型图，自动识别墙和房间</strong>
+            <span className="text-[13px] text-white/70">售楼处、中介给的平面图都可以。自动读尺寸、识别墙和房间名，几分钟生成你家的 3D 户型；图片只在你的浏览器里处理。</span>
+          </span>
+          <span className="text-white/70">›</span>
+        </Link>
+      </section>
+
+      <section>
+        <h2 className="mb-3 mt-7 text-[17px] font-semibold">没有户型图？从一套设计模板开始</h2>
         <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-4">
           {TEMPLATES.filter((t) => !t.hidden).map((t) => (
             <div key={t.id} className="flex flex-col gap-2 rounded-2xl bg-panel p-3.5 shadow-card">
@@ -79,34 +112,11 @@ export default async function Home() {
         <p className="mt-3 text-xs text-muted">户型：客餐厅 + 厨房 + 卧室，开间、进深都能改；墙上的插座、燃气点位可以改成你家实测的高度。</p>
       </section>
 
-      <section>
-        <h2 className="mb-3 mt-7 text-[17px] font-semibold">或者，用你家的户型图</h2>
-        <Link
-          href="/trace"
-          className="flex items-center gap-3 rounded-2xl bg-panel p-4 no-underline shadow-card"
-        >
-          <span className="text-3xl">📐</span>
-          <span className="flex-1">
-            <strong className="block">上传户型图，自动识别墙和房间</strong>
-            <span className="text-[13px] text-muted">售楼处、中介给的平面图都可以。定好比例、点一下墙，几分钟生成你家的 3D 户型；图片只在你的浏览器里处理。</span>
-          </span>
-          <span className="text-muted">›</span>
-        </Link>
-      </section>
 
-      {plans.length > 0 && (
-        <section>
-          <h2 className="mb-3 mt-7 text-[17px] font-semibold">我的方案</h2>
-          <ul className="m-0 list-none divide-y divide-line rounded-xl bg-panel p-0">
-            {plans.map((p) => (
-              <li key={p.id} className="flex justify-between gap-3 px-3.5 py-3">
-                <Link href={`/plan/${p.id}`}>{p.name}</Link>
-                <span className="text-xs text-muted">{new Date(p.updated_at).toLocaleString('zh-CN', { hour12: false })}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+      {/* “我的方案”要查数据库，单独流式加载，不挡住页面其他部分 */}
+      <Suspense fallback={<div className="mt-7 h-[120px] animate-pulse rounded-xl bg-soft-2" />}>
+        <MyPlans />
+      </Suspense>
 
       <footer className="mt-10 text-xs text-muted">
         Fitly 只做软装与家具布局试装。涉及水电、燃气、防水的提醒只给检查项和提问清单，实际施工以现场师傅、物业或燃气公司确认为准。
