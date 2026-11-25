@@ -1,8 +1,11 @@
 'use client';
 
 import {
+  autoDetectWalls,
   bandsToWalls,
   classifyGap,
+  doorOpensIntoRoom,
+  wallMask,
   detectBands,
   detectRooms,
   polygonArea,
@@ -14,7 +17,7 @@ import {
 } from '@fitly/layout-engine';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useCallback, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { Button, Chip, cn, inputClass, TextButton } from '@/ui';
 import { TopBar } from '@/ui/TopBar';
 import { buildPlanFromTrace, defaultGapSide, type RoomMeta, type Scale } from './buildPlan';
@@ -100,7 +103,22 @@ function roomCentroid(r: TraceRoom): Pt {
   return { x: (Math.min(...xs) + Math.max(...xs)) / 2, y: (Math.min(...ys) + Math.max(...ys)) / 2 };
 }
 
-export default function Tracer() {
+const detectOptions = (sc: Scale) => {
+  const k = (sc.sx + sc.sy) / 2;
+  return { minLen: 150 / k, minThick: 50 / k, maxThick: 450 / k, minGap: 400 / k, maxGap: 4500 / k };
+};
+const roomCell = (sc: Scale) => Math.max(2, Math.round(50 / ((sc.sx + sc.sy) / 2)));
+const minRoomArea = (sc: Scale) => 1.2e6 / (sc.sx * sc.sy);
+
+function lumOf(im: Img, x: number, y: number): number {
+  const xi = Math.max(0, Math.min(im.w - 1, Math.round(x)));
+  const yi = Math.max(0, Math.min(im.h - 1, Math.round(y)));
+  const i = (yi * im.w + xi) * 4;
+  const d = im.data.data;
+  return 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+}
+
+export default function Tracer({ sample }: { sample?: string }) {
   const router = useRouter();
   const [step, setStep] = useState<Step>('upload');
   const [img, setImg] = useState<Img | null>(null);
@@ -122,30 +140,11 @@ export default function Tracer() {
   const boxRef = useRef<HTMLDivElement>(null);
 
   const s = (scale.sx + scale.sy) / 2;
-  const opts = useMemo(
-    () => ({ minLen: 150 / s, minThick: 50 / s, maxThick: 450 / s, minGap: 400 / s, maxGap: 2700 / s }),
-    [s],
-  );
-
-  const lumAt = useCallback(
-    (x: number, y: number) => {
-      if (!img) return 255;
-      const xi = Math.max(0, Math.min(img.w - 1, Math.round(x)));
-      const yi = Math.max(0, Math.min(img.h - 1, Math.round(y)));
-      const i = (yi * img.w + xi) * 4;
-      const d = img.data.data;
-      return 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-    },
-    [img],
-  );
-
   /** 墙改了以后重新分房间，尽量保留已经标好的房间类型 */
   const recomputeRooms = useCallback(
-    (ws: TraceWall[], prevRooms: TraceRoom[], prevMeta: RoomMeta[]) => {
-      if (!img) return;
-      const cell = Math.max(2, Math.round(50 / s));
-      const minArea = 1.2e6 / (scale.sx * scale.sy);
-      const next = detectRooms(ws, img.w, img.h, cell, minArea);
+    (ws: TraceWall[], prevRooms: TraceRoom[], prevMeta: RoomMeta[], sc: Scale = scale, given?: TraceRoom[], im: Img | null = img) => {
+      if (!im) return;
+      const next = given ?? detectRooms(ws, im.w, im.h, roomCell(sc), minRoomArea(sc));
       const meta = next.map((r, i): RoomMeta => {
         const old = prevRooms.findIndex((o) => {
           const c = roomCentroid(o);
@@ -158,32 +157,19 @@ export default function Tracer() {
       setRoomMeta(meta);
       return next;
     },
-    [img, s, scale.sx, scale.sy],
+    [img, scale],
   );
 
-  const detect = (color: [number, number, number]) => {
-    if (!img) return;
-    const { w, h, data } = img;
-    const mask = new Uint8Array(w * h);
-    const d = data.data;
-    for (let i = 0; i < w * h; i++) {
-      const dr = d[i * 4] - color[0];
-      const dg = d[i * 4 + 1] - color[1];
-      const db = d[i * 4 + 2] - color[2];
-      if (Math.abs(dr) + Math.abs(dg) + Math.abs(db) < 54) mask[i] = 1;
-    }
-    const ws = bandsToWalls(detectBands({ w, h, data: mask }, opts), opts);
-    if (ws.length < 3) {
-      setErr('没认出几面墙。换个位置再点一下墙体（点在墙的正中间），或者换一张更清晰的图。');
-      return;
-    }
-    const rs = recomputeRooms(ws, [], []) ?? [];
-    // 门窗：看缺口旁有没有画门扇的 1/4 圆，有就是门，顺便得到开门方向和铰链位置
+  /** 识别出墙和房间以后：判断每个缺口是门还是窗，进入“检查并修正” */
+  const finishDetection = (ws: TraceWall[], rs: TraceRoom[], sc: Scale, im: Img) => {
+    const lum = (x: number, y: number) => lumOf(im, x, y);
+    // 门窗：看缺口旁有没有画门扇的 1/4 圆，有就是门，顺便得到开门方向和铰链位置；门只会开向房间里
     for (const wl of ws) {
       for (const g of wl.gaps) {
-        const guess = classifyGap(wl, g, lumAt, wl.dir === 'h' ? scale.sx : scale.sy);
-        g.kind = guess.kind;
-        if (guess.kind === 'door') {
+        const guess = classifyGap(wl, g, lum, wl.dir === 'h' ? sc.sx : sc.sy);
+        const isDoor = guess.kind === 'door' && doorOpensIntoRoom(wl, g, guess, rs);
+        g.kind = isDoor ? 'door' : 'window';
+        if (isDoor) {
           g.side = guess.side ?? defaultGapSide(wl, g, rs);
           g.hinge = guess.hinge;
         }
@@ -192,6 +178,32 @@ export default function Tracer() {
     setWalls(ws);
     setErr(null);
     setStep('edit');
+  };
+
+  /** 点墙取色识别 */
+  const detect = (color: [number, number, number], sc: Scale = scale) => {
+    if (!img) return;
+    const o = detectOptions(sc);
+    const ws = bandsToWalls(detectBands(wallMask(img.data.data, 4, img.w, img.h, color), o), o);
+    if (ws.length < 3) {
+      setErr('没认出几面墙。换个位置再点一下墙体（点在墙的正中间），或者换一张更清晰的图。');
+      return;
+    }
+    const rs = recomputeRooms(ws, [], [], sc) ?? [];
+    finishDetection(ws, rs, sc, img);
+  };
+
+  /** 定好比例后自动找墙体颜色并识别；认不出再请用户点一下墙 */
+  const autoDetect = (sc: Scale, im: Img | null = img) => {
+    if (!im) return;
+    const r = autoDetectWalls(im.data.data, 4, im.w, im.h, detectOptions(sc), roomCell(sc), minRoomArea(sc));
+    if (!r) {
+      setStep('wall');
+      setErr('没能自动认出墙体，请在图上点一下墙。');
+      return;
+    }
+    recomputeRooms(r.walls, [], [], sc, r.rooms, im);
+    finishDetection(r.walls, r.rooms, sc, im);
   };
 
   const toImg = (e: ReactPointerEvent): Pt => {
@@ -277,8 +289,9 @@ export default function Tracer() {
       setScale({ sx: mm / d, sy: mm / d });
       setStep('scaleY');
     } else {
-      setScale((sc) => ({ ...sc, sy: mm / d }));
-      setStep('wall');
+      const sc = { ...scale, sy: mm / d };
+      setScale(sc);
+      autoDetect(sc);
     }
     setPts([]);
     setMmInput('');
@@ -312,12 +325,12 @@ export default function Tracer() {
   };
 
   /** 读图上的尺寸数字自动定比例 */
-  const runDims = async () => {
-    if (!img) return;
+  const runDims = async (im: Img | null = img) => {
+    if (!im) return;
     setDims({ state: 'loading', hits: [] });
     setErr(null);
     try {
-      const { sx, sy, hits } = await readDimensions(img.data);
+      const { sx, sy, hits } = await readDimensions(im.data);
       const nh = hits.filter((x) => x.dir === 'h').length;
       const nv = hits.filter((x) => x.dir === 'v').length;
       if (sx && sy) {
@@ -329,7 +342,7 @@ export default function Tracer() {
           note: `已按 ${nh} 个横向、${nv} 个纵向尺寸定好比例（绿色是用到的尺寸）。${stretch > 0.03 ? `这张图横竖被拉伸了约 ${Math.round(stretch * 100)}%，已分别处理。` : ''}`,
         });
         setPts([]);
-        setStep('wall');
+        autoDetect({ sx, sy }, im);
       } else if (sx || sy) {
         const s0 = (sx ?? sy)!;
         setScale({ sx: s0, sy: s0 });
@@ -365,6 +378,37 @@ export default function Tracer() {
     }
   };
 
+  // 示例户型：自动加载图片并一路跑完：读尺寸定比例 → 识别墙和房间 → 识别房间名
+  const autoChain = useRef(false);
+  useEffect(() => {
+    if (!sample || !/^[a-z]$/.test(sample)) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const blob = await fetch(`/samples/plan-${sample}.png`).then((r) => r.blob());
+        const im = await loadImage(new File([blob], `plan-${sample}.png`, { type: blob.type }));
+        if (cancelled) return;
+        setImg(im);
+        setStep('scaleX');
+        autoChain.current = true;
+        await runDims(im);
+      } catch {
+        setErr('示例图加载失败，请稍后再试');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sample]);
+  useEffect(() => {
+    if (step === 'edit' && autoChain.current && rooms.length > 0) {
+      autoChain.current = false;
+      void runOcr();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, rooms]);
+
   // 多数房间的面积都和图上对不上，多半是比例定错了
   const scaleWarning = useMemo(() => {
     const diffs = rooms
@@ -383,7 +427,7 @@ export default function Tracer() {
     upload: '选一张户型图（售楼处、中介给的平面图都行）。图片只在你的浏览器里处理，不会上传。',
     scaleX: '找一段标了尺寸的横向墙（比如底部的 3242），在图上点它的左右两端，再填上这个数字。',
     scaleY: '再找一段竖向尺寸点两端。很多截图横竖被拉伸过，分开定比例更准；确定没拉伸可以跳过。',
-    wall: '在图上点一下墙体（深色的墙中间），程序会找出同样颜色的墙。',
+    wall: '在图上点一下墙体（点在深色的墙中间），按这个颜色重新识别墙和房间。',
     edit:
       tool === 'add'
         ? addStart
@@ -521,7 +565,7 @@ export default function Tracer() {
 
           {dims.note && <p className={cn('m-0 rounded-lg px-2.5 py-1.5 text-[13px]', dims.state === 'error' ? 'bg-danger-soft text-danger' : 'bg-ok-soft text-ok')}>{dims.note}</p>}
           {step === 'scaleX' && (
-            <Button variant="primary" disabled={dims.state === 'loading'} onClick={runDims}>
+            <Button variant="primary" disabled={dims.state === 'loading'} onClick={() => runDims()}>
               {dims.state === 'loading' ? '正在读图上的尺寸…' : '自动读尺寸定比例（推荐）'}
             </Button>
           )}
@@ -545,8 +589,8 @@ export default function Tracer() {
                 {step === 'scaleY' && (
                   <Button
                     onClick={() => {
-                      setStep('wall');
                       setPts([]);
+                      autoDetect(scale);
                     }}
                   >
                     跳过，和横向一样
@@ -578,8 +622,8 @@ export default function Tracer() {
                 >
                   ＋ 画墙
                 </Chip>
-                <TextButton className="ml-auto text-xs" onClick={() => setStep('wall')}>
-                  重新识别
+                <TextButton className="ml-auto text-xs" onClick={() => setStep('wall')} title="墙认错了？点一下墙体，按那个颜色重新识别">
+                  点墙重新识别
                 </TextButton>
               </div>
 

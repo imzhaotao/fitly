@@ -4,7 +4,9 @@ import { combineScales, measureDimension, type DimHit, type TraceRoom } from '@f
 import { parseRoomLabel, type LabelGuess } from './labels';
 
 /** 识别时把文字以外的东西（木地板纹理、瓷砖）过滤掉：亮度低于这个值的才当作字 */
-const TEXT_LUM = 110;
+const TEXT_LUM = 140;
+/** 第二遍更严：房间名通常接近黑色，水磨石的灰点会被挡在外面 */
+const TEXT_LUM_STRICT = 85;
 
 type Worker = Awaited<ReturnType<typeof import('tesseract.js')['createWorker']>>;
 
@@ -75,7 +77,7 @@ function despeckle(px: ImageData, minArea: number, minSpan: number) {
   }
 }
 
-/** 从整张图里裁出一块，放大 2 倍并二值化，只留下深色文字 */
+/** 从整张图里裁出一块，放大并二值化，只留下深色文字 */
 function cropForOcr(data: ImageData, x0: number, y0: number, x1: number, y1: number, clean = false): HTMLCanvasElement {
   const w = Math.max(1, Math.round(x1 - x0));
   const h = Math.max(1, Math.round(y1 - y0));
@@ -83,17 +85,19 @@ function cropForOcr(data: ImageData, x0: number, y0: number, x1: number, y1: num
   src.width = data.width;
   src.height = data.height;
   src.getContext('2d')!.putImageData(data, 0, 0);
+  // 房间文字一般只有十几像素高，放大 2 倍再识别
+  const K = 2;
   const out = document.createElement('canvas');
-  out.width = w * 2;
-  out.height = h * 2;
+  out.width = w * K;
+  out.height = h * K;
   const g = out.getContext('2d', { willReadFrequently: true })!;
   g.imageSmoothingQuality = 'high';
-  g.drawImage(src, x0, y0, w, h, 0, 0, w * 2, h * 2);
+  g.drawImage(src, x0, y0, w, h, 0, 0, w * K, h * K);
   const px = g.getImageData(0, 0, out.width, out.height);
   const d = px.data;
   for (let i = 0; i < d.length; i += 4) {
     const lum = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-    const v = lum < TEXT_LUM ? 0 : 255;
+    const v = lum < (clean ? TEXT_LUM_STRICT : TEXT_LUM) ? 0 : 255;
     d[i] = d[i + 1] = d[i + 2] = v;
   }
   if (clean) despeckle(px, 80, 12);
@@ -147,15 +151,23 @@ export async function readRoomLabels(data: ImageData, rooms: TraceRoom[], onProg
 export async function readDimensions(data: ImageData): Promise<{ sx?: number; sy?: number; hits: DimHit[] }> {
   const worker = await getWorker();
   const { width: W, height: H } = data;
+  const base = document.createElement('canvas');
+  base.width = W;
+  base.height = H;
+  base.getContext('2d')!.putImageData(data, 0, 0);
+  // 尺寸数字通常很小，放大 2 倍再识别（识别结果的坐标再除回去）
+  const K = 2;
   const src = document.createElement('canvas');
-  src.width = W;
-  src.height = H;
-  src.getContext('2d')!.putImageData(data, 0, 0);
+  src.width = W * K;
+  src.height = H * K;
+  const sg = src.getContext('2d')!;
+  sg.imageSmoothingQuality = 'high';
+  sg.drawImage(base, 0, 0, W * K, H * K);
   const rot = document.createElement('canvas');
-  rot.width = H;
-  rot.height = W;
+  rot.width = H * K;
+  rot.height = W * K;
   const rg = rot.getContext('2d')!;
-  rg.translate(H, 0);
+  rg.translate(H * K, 0);
   rg.rotate(Math.PI / 2);
   rg.drawImage(src, 0, 0);
 
@@ -178,7 +190,7 @@ export async function readDimensions(data: ImageData): Promise<{ sx?: number; sy
             for (const wd of l.words) {
               const v = Number(wd.text);
               if (!(v >= 300 && v <= 30000) || wd.confidence < 50) continue;
-              const bb = wd.bbox;
+              const bb = { x0: wd.bbox.x0 / K, y0: wd.bbox.y0 / K, x1: wd.bbox.x1 / K, y1: wd.bbox.y1 / K };
               // 转过的图：x' = H-1-y, y' = x  →  y = H-1-x', x = y'
               const box = pass === 'h' ? bb : { x0: bb.y0, x1: bb.y1, y0: H - 1 - bb.x1, y1: H - 1 - bb.x0 };
               const hit = measureDimension(lumAt, W, H, box, v, pass);

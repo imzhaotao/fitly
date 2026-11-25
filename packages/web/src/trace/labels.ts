@@ -16,11 +16,11 @@ export function parseRoomLabel(raw: string): LabelGuess {
   const out: LabelGuess = {};
 
   const rules: [RegExp, string, Space][] = [
-    [/客.?餐|餐.?厅/, '客餐厅', 'living'],
+    [/客.?餐|餐.?厅|客.{1,2}厅/, '客餐厅', 'living'],
     [/客厅|起居/, '客厅', 'living'],
     [/主卫/, '主卫', 'bath'],
     [/客卫/, '客卫', 'bath'],
-    [/卫生|卫|洗手|浴/, '卫生间', 'bath'],
+    [/卫生|卫|洗手|浴|生间|平生/, '卫生间', 'bath'],
     [/主[卧臣室]|主$/, '主卧', 'bedroom'],
     [/次[卧臣室]|次$/, '次卧', 'bedroom'],
     [/儿童/, '儿童房', 'bedroom'],

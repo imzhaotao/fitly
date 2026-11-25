@@ -12,6 +12,8 @@ describe('户型图房间文字解析（识别结果有错字）', () => {
     ['儿童房 9.8㎡', '儿童房', 'bedroom', 9.8],
     ['玄关', '玄关', 'entry', undefined],
     ['卫生 旧 | 3 65mi', '卫生间', 'bath', 3.65],
+    ['客 佑 厅 ||', '客餐厅', 'living', undefined],
+    ['平生 || 小 | 和', '卫生间', 'bath', undefined],
   ])('%s → %s', (raw, name, space, area) => {
     const g = parseRoomLabel(raw);
     expect(g.name).toBe(name);
