@@ -1,0 +1,17 @@
+{
+  "name": "fitly",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@9.15.9",
+  "scripts": {
+    "dev": "pnpm --filter @fitly/web dev",
+    "build": "pnpm --filter @fitly/web build",
+    "test": "vitest run",
+    "typecheck": "pnpm -r typecheck",
+    "db:migrate": "pnpm --filter @fitly/web db:migrate"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vitest": "^5.1.2"
+  }
+}
