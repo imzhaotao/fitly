@@ -1,6 +1,6 @@
 'use client';
 
-import { anchorNormal, resolveAnchorPoint, resolveMove, toPolygons, wallDir, wallLength, type Anchor, type FurnitureItem, type Plan, type Point, type RoomZone } from '@fitly/layout-engine';
+import { anchorNormal, pointInPolygon, resolveAnchorPoint, resolveMove, toPolygons, wallDir, wallLength, type Anchor, type FurnitureItem, type Plan, type Point, type RoomZone } from '@fitly/layout-engine';
 import { ContactShadows, Html, Line, OrbitControls, OrthographicCamera, PerspectiveCamera } from '@react-three/drei';
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -54,10 +54,7 @@ function planBounds(plan: Plan, roomId?: string) {
 }
 
 function roomAt(plan: Plan, p: Point): RoomZone | undefined {
-  return plan.rooms.find((r) => {
-    const b = bounds(r.polygon);
-    return p.x >= b.x0 && p.x <= b.x1 && p.y >= b.y0 && p.y <= b.y1;
-  });
+  return plan.rooms.find((r) => pointInPolygon(p, r.polygon));
 }
 
 /** 拖拽吸附：10mm 网格 + 距房间墙面 120mm 内贴墙 */
