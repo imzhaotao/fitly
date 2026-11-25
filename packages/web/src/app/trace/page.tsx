@@ -6,6 +6,7 @@ export const metadata: Metadata = {
   description: '上传户型图，定比例、点一下墙，自动生成可以摆家具的 3D 户型。',
 };
 
-export default function TracePage() {
-  return <Tracer />;
+export default async function TracePage({ searchParams }: { searchParams: Promise<{ sample?: string }> }) {
+  const { sample } = await searchParams;
+  return <Tracer key={sample ?? 'upload'} sample={sample} />;
 }

@@ -7,6 +7,13 @@ import { TemplateButton } from './TemplateButton';
 
 export const dynamic = 'force-dynamic';
 
+/** 示例户型图（scripts/gen-sample-plans.py 生成的原创布局） */
+const SAMPLES = [
+  { id: 'a', name: '一室一厅', area: '约 48㎡' },
+  { id: 'b', name: '两室一厅', area: '约 76㎡' },
+  { id: 'c', name: '三室两厅', area: '约 108㎡' },
+];
+
 async function myPlans() {
   const ws = await readWorkspace();
   if (!ws) return [];
@@ -86,6 +93,21 @@ export default function Home() {
           </span>
           <span className="text-white/70">›</span>
         </Link>
+        <div className="mt-3">
+          <span className="text-xs text-muted">手边没有户型图？点一张示例看看效果：</span>
+          <div className="mt-2 grid grid-cols-3 gap-2.5">
+            {SAMPLES.map((x) => (
+              <Link key={x.id} href={`/trace?sample=${x.id}`} className="overflow-hidden rounded-xl bg-panel no-underline shadow-card transition-opacity active:opacity-60">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={`/samples/plan-${x.id}-thumb.jpg`} alt={x.name} className="block aspect-square w-full object-cover" loading="lazy" />
+                <span className="block px-2 py-1.5 text-[13px]">
+                  {x.name}
+                  <span className="ml-1 text-xs text-muted">{x.area}</span>
+                </span>
+              </Link>
+            ))}
+          </div>
+        </div>
       </section>
 
       <section>
