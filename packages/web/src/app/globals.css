@@ -1,0 +1,64 @@
+@import 'tailwindcss';
+
+/* Fitly 设计变量：暖米色底、深墨色主按钮、圆角卡片 */
+@theme {
+  --color-bg: #f4f1ec;
+  --color-panel: #ffffff;
+  --color-ink: #1f1d1a;
+  --color-muted: #7a746b;
+  --color-line: #e6e0d6;
+  --color-field: #fbfaf8;
+  --color-soft: #f1ede6;
+  --color-soft-2: #efebe4;
+  --color-ask: #f6f3ee;
+  --color-accent: #2f6fed;
+  --color-accent-line: #c8d7fb;
+  --color-danger: #e5483b;
+  --color-danger-soft: #fde8e6;
+  --color-warn: #d99a1e;
+  --color-warn-ink: #a26f0b;
+  --color-warn-soft: #fbf1dc;
+  --color-calm: #9b958b;
+  --color-ok: #2f9e6a;
+  --color-ok-soft: #e3f4ec;
+
+  --shadow-card: 0 6px 24px rgba(40, 30, 20, 0.1);
+  --shadow-float: 0 2px 10px rgba(40, 30, 20, 0.08);
+  --shadow-sheet: 0 -6px 24px rgba(40, 30, 20, 0.14);
+
+  --font-sans: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
+
+  /* 手机优先：默认样式给手机，desk: 前缀给 ≥900px 的电脑 */
+  --breakpoint-desk: 900px;
+}
+
+@layer base {
+  html,
+  body {
+    @apply m-0 max-w-full overflow-x-hidden bg-bg p-0 font-sans text-sm leading-normal text-ink antialiased;
+  }
+  button {
+    @apply cursor-pointer;
+  }
+  button:disabled {
+    @apply cursor-not-allowed opacity-50;
+  }
+}
+
+/* 长按不弹系统菜单、不选中文字（手机拖家具时很容易误触发） */
+@utility no-callout {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+@layer base {
+  input,
+  textarea,
+  select {
+    -webkit-touch-callout: default;
+    -webkit-user-select: text;
+    user-select: text;
+  }
+}
