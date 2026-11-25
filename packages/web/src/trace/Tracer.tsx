@@ -322,7 +322,7 @@ export default function Tracer() {
   };
 
   return (
-    <div className="no-callout flex min-h-dvh flex-col">
+    <div className="no-callout flex h-dvh flex-col overflow-hidden">
       <TopBar>
         <Link href="/" className="text-lg font-extrabold tracking-wide no-underline">
           Fitly
@@ -344,7 +344,7 @@ export default function Tracer() {
       </TopBar>
 
       <div className="flex min-h-0 flex-1 flex-col desk:flex-row">
-        <div className="min-h-0 flex-1 overflow-auto bg-[#e9e4dc] p-2">
+        <div className="min-h-0 flex-1 overflow-auto overscroll-contain bg-[#e9e4dc] p-2">
           {!img ? (
             <label className="mx-auto mt-10 flex max-w-md cursor-pointer flex-col items-center gap-3 rounded-2xl border-2 border-dashed border-line bg-panel p-8 text-center">
               <span className="text-3xl">🏠</span>
@@ -438,7 +438,9 @@ export default function Tracer() {
           )}
         </div>
 
-        <aside className="flex max-h-[45dvh] flex-col gap-3 overflow-y-auto border-t border-line bg-panel p-3.5 desk:max-h-none desk:w-[320px] desk:border-l desk:border-t-0">
+        {/* 面板：内容区单独滚动，“生成”按钮固定在底部，始终可见 */}
+        <aside className="flex max-h-[50dvh] flex-none flex-col border-t border-line bg-panel desk:max-h-none desk:w-[320px] desk:border-l desk:border-t-0">
+          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto overscroll-contain p-3.5">
           <p className="m-0 text-[13px] text-muted">{hint[step]}</p>
 
           {(step === 'scaleX' || step === 'scaleY') && (
@@ -611,15 +613,18 @@ export default function Tracer() {
                 ))}
               </div>
 
-              <div className="mt-auto flex flex-col gap-2 border-t border-line pt-3">
-                <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} maxLength={40} />
-                <Button variant="primary" block disabled={busy || rooms.length === 0} onClick={save}>
-                  {busy ? '正在生成…' : '生成 3D 户型'}
-                </Button>
-              </div>
             </>
           )}
           {err && <p className="m-0 text-[13px] text-danger">{err}</p>}
+          </div>
+          {step === 'edit' && (
+            <div className="flex flex-none gap-2 border-t border-line bg-panel px-3.5 pb-[calc(10px+env(safe-area-inset-bottom))] pt-2.5 desk:flex-col">
+              <input className={cn(inputClass, 'desk:flex-none')} value={name} onChange={(e) => setName(e.target.value)} maxLength={40} aria-label="方案名称" />
+              <Button variant="primary" className="flex-none desk:h-10 desk:w-full" disabled={busy || rooms.length === 0} onClick={save}>
+                {busy ? '正在生成…' : '生成 3D 户型'}
+              </Button>
+            </div>
+          )}
         </aside>
       </div>
     </div>
