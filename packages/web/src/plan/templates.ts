@@ -1,10 +1,13 @@
 import { applyShape, DEFAULT_SHAPE, type Anchor, type FurnitureItem, type Plan } from '@fitly/layout-engine';
+import { buildHomeA } from './homeA';
 
 export interface TemplateInfo {
   id: string;
   name: string;
   summary: string;
   tags: string[];
+  /** 不在首页展示，只能通过专属链接 /new?t=<id> 打开 */
+  hidden?: boolean;
 }
 
 export const TEMPLATES: TemplateInfo[] = [
@@ -19,6 +22,13 @@ export const TEMPLATES: TemplateInfo[] = [
     name: '亲子活动留空型',
     summary: '直排 2.4 米沙发，不放茶几，客厅中间留出 2 米见方的爬爬垫；衣柜门型还没定。',
     tags: ['直排沙发', '活动区', '门型待定'],
+  },
+  {
+    id: 'home-a',
+    name: '两室一厅 · 双阳台',
+    summary: '按屋主上传的户型图录入：客餐厅、主卧、次卧、卫生间、厨房、两个阳台。',
+    tags: ['自家户型'],
+    hidden: true,
   },
 ];
 
@@ -74,7 +84,8 @@ function dining(tableW: number): FurnitureItem[] {
 }
 
 export function createTemplatePlan(templateId: string): Plan {
-  const t = TEMPLATES.find((x) => x.id === templateId) ?? TEMPLATES[0];
+  if (templateId === 'home-a') return { id: uid('plan'), ...buildHomeA() };
+  const t = TEMPLATES.find((x) => x.id === templateId && !x.hidden) ?? TEMPLATES[0];
   const base: Plan = {
     id: uid('plan'),
     version: 1,

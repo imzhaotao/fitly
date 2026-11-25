@@ -1,6 +1,6 @@
 // 核心单位：毫米（mm）。平面 x 向右、y 向深，高度向上。
 
-export type Space = 'living' | 'kitchen' | 'bedroom' | 'bath' | 'entry';
+export type Space = 'living' | 'kitchen' | 'bedroom' | 'bath' | 'entry' | 'balcony';
 export type Stage = 'measure' | 'layout' | 'confirm';
 
 export type ObjectType =

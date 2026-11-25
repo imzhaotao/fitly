@@ -355,3 +355,40 @@ export function pointInPolygon(p: Point, poly: Poly): boolean {
 export function distance(a: Point, b: Point): number {
   return dist(a, b);
 }
+
+export function signedArea(poly: Poly): number {
+  let a = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const p = poly[i];
+    const q = poly[(i + 1) % poly.length];
+    a += p.x * q.y - q.x * p.y;
+  }
+  return a / 2;
+}
+
+/**
+ * 直角多边形向内收缩 d（用于把墙中线围成的房间换算成净面积边界）。
+ * 每个顶点沿相邻两条边的内法线之和移动，凸角、凹角都适用。
+ */
+export function insetOrthoPolygon(poly: Poly, d: number): Poly {
+  const ccw = signedArea(poly) > 0;
+  const n = poly.length;
+  const inward = (a: Point, b: Point): Point => {
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len = Math.hypot(dx, dy) || 1;
+    // y 轴向下的平面里：逆时针（面积为正）时左法线朝内
+    return ccw ? { x: -dy / len, y: dx / len } : { x: dy / len, y: -dx / len };
+  };
+  return poly.map((p, i) => {
+    const prev = poly[(i - 1 + n) % n];
+    const next = poly[(i + 1) % n];
+    const n1 = inward(prev, p);
+    const n2 = inward(p, next);
+    return { x: Math.round(p.x + (n1.x + n2.x) * d), y: Math.round(p.y + (n1.y + n2.y) * d) };
+  });
+}
+
+export function polygonArea(poly: Poly): number {
+  return Math.abs(signedArea(poly));
+}

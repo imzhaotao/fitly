@@ -58,7 +58,7 @@ export default async function Home() {
       <section>
         <h2 className="mb-3 mt-7 text-[17px] font-semibold">从一套设计模板开始</h2>
         <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-4">
-          {TEMPLATES.map((t) => (
+          {TEMPLATES.filter((t) => !t.hidden).map((t) => (
             <div key={t.id} className="flex flex-col gap-2 rounded-2xl bg-panel p-3.5 shadow-card">
               <Thumb id={t.id} />
               <h3 className="mb-0 mt-1 text-base font-semibold">{t.name}</h3>

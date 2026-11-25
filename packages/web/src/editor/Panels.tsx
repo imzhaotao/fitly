@@ -205,7 +205,7 @@ export function AnchorInspector({ anchor, plan, onChange }: { anchor: Anchor; pl
   );
 }
 
-export const SPACE_LABEL: Record<Space, string> = { living: '客餐厅', kitchen: '厨房', bedroom: '卧室', bath: '卫生间', entry: '玄关' };
+export const SPACE_LABEL: Record<Space, string> = { living: '客餐厅', kitchen: '厨房', bedroom: '卧室', bath: '卫生间', entry: '玄关', balcony: '阳台' };
 
 export function CatalogPanel({ onAdd, defaultSpace }: { onAdd: (type: FurnitureItem['type']) => void; defaultSpace: Space }) {
   const [space, setSpace] = useState<Space>(defaultSpace);

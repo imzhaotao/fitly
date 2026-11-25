@@ -1,7 +1,7 @@
 'use client';
 
 import { auditPlan, evaluateInteractive, PITFALLS, type EvaluatedPitfall } from '@fitly/content';
-import { anchorPolygon, collisionsOf, findFreeSpot, createQuery, DEFAULT_SHAPE, edgeGap, roomOfAnchor, roomOfItem, toPolygons, type FurnitureItem, type Plan, type PlanNote, type Stage } from '@fitly/layout-engine';
+import { anchorPolygon, collisionsOf, findFreeSpot, createQuery, edgeGap, roomOfAnchor, roomOfItem, toPolygons, type FurnitureItem, type Plan, type PlanNote, type Stage } from '@fitly/layout-engine';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
@@ -327,9 +327,14 @@ export default function Editor({ planId, initialPlan, canEdit }: { planId: strin
     </Panel>
   );
 
-  const shapePanel = (
+  const shapePanel = !plan.shape ? (
+    <Panel className="text-xs text-muted">
+      <p>这套户型是按户型图录入的，暂时不能在这里改开间进深。</p>
+      <p>可以直接摆家具、改墙上点位的位置和高度。</p>
+    </Panel>
+  ) : (
     <ShapePanel
-      params={plan.shape?.params ?? DEFAULT_SHAPE}
+      params={plan.shape.params}
       onChange={(p) => {
         dispatch({ type: 'shape', params: p });
         track('shape_edited');
