@@ -69,7 +69,7 @@ function transpose(m: Mask): Mask {
   return { w: m.h, h: m.w, data: out };
 }
 
-/** 逐行找连续墙像素，把相邻行里起止相近的连成矩形带 */
+/** 逐行找连续墙像素，把相邻行里起止相近的连成矩形带（只按墙厚过滤，长度留给调用方判断） */
 function rowBands(m: Mask, o: DetectOptions): { a0: number; a1: number; t0: number; t1: number }[] {
   type Active = { a0: number; a1: number; t0: number; t1: number };
   const done: Active[] = [];
@@ -86,7 +86,7 @@ function rowBands(m: Mask, o: DetectOptions): { a0: number; a1: number; t0: numb
         }
         const s = x;
         while (x < m.w && at(m, x, y)) x++;
-        if (x - s >= o.minLen) runs.push([s, x]);
+        if (x - s >= 2) runs.push([s, x]);
       }
     }
     const next: Active[] = [];
@@ -106,14 +106,58 @@ function rowBands(m: Mask, o: DetectOptions): { a0: number; a1: number; t0: numb
   }
   return done.filter((b) => {
     const t = b.t1 - b.t0;
-    // 门窗两侧剩下的墙头往往只比墙厚长一点，也要保留，后面按共线合并成带缺口的整面墙
-    return t >= o.minThick && t <= o.maxThick && b.a1 - b.a0 >= Math.max(o.minLen, t * 0.6);
+    return t >= o.minThick && t <= o.maxThick;
   });
 }
 
+/**
+ * “墙身”掩膜：横墙的每一列、竖墙的每一行，连续墙色的长度应落在墙厚范围内。
+ * 贴着墙的细线（门窗线、推拉门线，只有 1–2px 厚）和垂直方向的墙（长度远超墙厚）都会被排除，
+ * 再在墙身上找连续的墙段，墙段就不会被这些线切碎。
+ * across='v' 表示按列量厚度（用于找横墙）。
+ */
+function coreMask(m: Mask, o: DetectOptions, across: 'v' | 'h'): Mask {
+  const out = new Uint8Array(m.w * m.h);
+  const outer = across === 'v' ? m.w : m.h;
+  const inner = across === 'v' ? m.h : m.w;
+  const idx = across === 'v' ? (o1: number, i1: number) => i1 * m.w + o1 : (o1: number, i1: number) => o1 * m.w + i1;
+  for (let a = 0; a < outer; a++) {
+    let i = 0;
+    while (i < inner) {
+      if (!m.data[idx(a, i)]) {
+        i++;
+        continue;
+      }
+      const s0 = i;
+      while (i < inner && m.data[idx(a, i)]) i++;
+      const len = i - s0;
+      if (len >= o.minThick && len <= o.maxThick) for (let k = s0; k < i; k++) out[idx(a, k)] = 1;
+    }
+  }
+  return { w: m.w, h: m.h, data: out };
+}
+
+/**
+ * 墙身只到垂直墙的内侧面为止；沿墙中线在原掩膜上往两头延伸，穿过墙角直到墙的外侧，
+ * 这样门窗紧挨墙角时剩下的一小截墙头也能连上墙角，不会因为太短被丢掉而让房间“漏”到室外。
+ */
+function extendBands(m: Mask, bands: { a0: number; a1: number; t0: number; t1: number }[], o: DetectOptions) {
+  return bands
+    .map((b) => {
+      const y = Math.round((b.t0 + b.t1 - 1) / 2);
+      let a0 = b.a0;
+      let a1 = b.a1;
+      while (a0 > 0 && m.data[y * m.w + a0 - 1]) a0--;
+      while (a1 < m.w && m.data[y * m.w + a1]) a1++;
+      return { ...b, a0, a1 };
+    })
+    .filter((b) => b.a1 - b.a0 >= Math.max(o.minLen, (b.t1 - b.t0) * 0.6));
+}
+
 export function detectBands(m: Mask, o: DetectOptions): Band[] {
-  const h = rowBands(m, o).map((b) => ({ dir: 'h' as const, ...b }));
-  const v = rowBands(transpose(m), o).map((b) => ({ dir: 'v' as const, ...b }));
+  const h = extendBands(m, rowBands(coreMask(m, o, 'v'), o), o).map((b) => ({ dir: 'h' as const, ...b }));
+  const mt = transpose(m);
+  const v = extendBands(mt, rowBands(transpose(coreMask(m, o, 'h')), o), o).map((b) => ({ dir: 'v' as const, ...b }));
   return [...h, ...v];
 }
 
@@ -140,8 +184,8 @@ export function bandsToWalls(bands: Band[], o: DetectOptions): TraceWall[] {
     }
     for (const cl of clusters) {
       const thick = Math.max(...cl.map((x) => x.t1 - x.t0));
-      // 只用够厚的墙带确定覆盖范围（窗户里的细线不算墙）
-      const solid = cl.filter((x) => x.t1 - x.t0 >= thick * 0.5).sort((a, b) => a.a0 - b.a0);
+      // 墙带都已按墙厚筛过（细线进不来），同一直线上厚薄不一的墙段都要保留
+      const solid = [...cl].sort((a, b) => a.a0 - b.a0);
       const c = solid.reduce((s, x) => s + (x.t0 + x.t1) / 2 * (x.a1 - x.a0), 0) / solid.reduce((s, x) => s + (x.a1 - x.a0), 0);
       let cur: TraceWall | null = null;
       for (const b of solid) {
@@ -329,6 +373,7 @@ export interface GapGuess {
   disc?: number;
   arc?: number;
   leaf?: number;
+  rough?: number;
 }
 
 /**
@@ -369,20 +414,20 @@ export function classifyGap(
       // 门扇扫过的 1/4 圆通常画成半透明白色，比圆外的地面亮
       const disc = mean([0.35, 0.5, 0.65, 0.8]) - mean([1.12, 1.22, 1.32]);
       // 圆弧边线：细线比两侧暗
+      // 取中位数而不是平均值：真正的线处处都有反差，水磨石、木纹的噪点只在零星几处有
       let arc = 0;
       for (let r = Math.round(width * 0.75); r <= Math.round(width * 1.1); r++) {
-        let sum = 0;
+        const vals: number[] = [];
         for (let k = 0; k <= 10; k++) {
           const th = ((30 + k * 5) * Math.PI) / 180;
-          sum += (at(r - 2, th) + at(r + 2, th)) / 2 - at(r, th);
+          vals.push((at(r - 2, th) + at(r + 2, th)) / 2 - at(r, th));
         }
-        arc = Math.max(arc, sum / 11);
+        arc = Math.max(arc, median(vals));
       }
       // 门扇本身：从铰链垂直于墙伸出、长度约等于门宽的一条直线（亮暗分界或细线）
       let leaf = 0;
       for (let o = -3; o <= 3; o++) {
-        let sum = 0;
-        let n = 0;
+        const vals: number[] = [];
         for (let t = R * 0.15; t <= R * 0.9; t += Math.max(1, R / 30)) {
           const p = (d: number) => {
             const a = hingeAlong + toward * (o + d);
@@ -392,15 +437,24 @@ export function classifyGap(
           const l = p(-2);
           const m = p(0);
           const r = p(2);
-          sum += Math.max(Math.abs(l - r), (l + r) / 2 - m);
-          n++;
+          vals.push(Math.max(Math.abs(l - r), (l + r) / 2 - m));
         }
-        leaf = Math.max(leaf, sum / n);
+        leaf = Math.max(leaf, median(vals));
       }
+      // 地面纹理粗糙度：圆内相邻像素的平均亮度差（水磨石高、木地板中、纯色地面接近 0）
+      let rough = 0;
+      let rn = 0;
+      for (const rr of [0.3, 0.45, 0.6, 0.75]) {
+        for (const th of angles) {
+          rough += Math.abs(at(rr * R, th) - at(rr * R + 2, th));
+          rn++;
+        }
+      }
+      rough /= rn;
       const score = Math.max(0, disc) + arc + leaf;
       // 门 = 有门扇直线，且有圆弧线或亮的 1/4 圆（贴着墙角的窗只会有一条直边，没有弧）
       const isDoor = leaf >= 20 && (arc >= 8 || disc >= 10);
-      if (isDoor && score > best.score) best = { kind: 'door', side, hinge, score, disc, arc, leaf };
+      if (isDoor && score > best.score) best = { kind: 'door', side, hinge, score, disc, arc, leaf, rough };
     }
   }
   // 没有门的特征就当窗（推拉门、门洞由用户点一下改）
@@ -507,6 +561,35 @@ export function measureDimension(
   return { value, dir, a0: left, a1: right, c: bestY, mmPerPx: value / span };
 }
 
+function median(v: number[]): number {
+  if (!v.length) return 0;
+  const s = [...v].sort((a, b) => a - b);
+  return s[Math.floor(s.length / 2)];
+}
+
+/**
+ * 门只会往房间里开：猜成门、但开向的那一侧（扇形中部）不在任何房间里的，改判为窗。
+ * 典型误判是卫生间外墙上的小窗：水磨石纹理、窗外的尺寸线会被当成门弧和门扇。
+ */
+export function doorOpensIntoRoom(wall: TraceWall, gap: TraceGap, guess: GapGuess, rooms: TraceRoom[]): boolean {
+  if (guess.kind !== 'door' || !guess.side) return true;
+  const sgn = guess.side === 'a' ? 1 : -1;
+  const mid = (gap.a0 + gap.a1) / 2;
+  const off = wall.thick / 2 + (gap.a1 - gap.a0) * 0.4;
+  const p = wall.dir === 'h' ? { x: mid, y: wall.c + sgn * off } : { x: wall.c + sgn * off, y: mid };
+  return rooms.some((r) => pointInPoly(p, r.polygon));
+}
+
+function pointInPoly(p: { x: number; y: number }, poly: { x: number; y: number }[]): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i];
+    const b = poly[j];
+    if (a.y > p.y !== b.y > p.y && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+}
+
 /** 多个尺寸算出的比例取中位数；与中位数偏差超过 5% 的视为配错的数字剔除 */
 export function combineScales(hits: DimHit[]): { mmPerPx: number; used: DimHit[] } | null {
   if (!hits.length) return null;
@@ -515,4 +598,74 @@ export function combineScales(hits: DimHit[]): { mmPerPx: number; used: DimHit[]
   const used = hits.filter((h) => Math.abs(h.mmPerPx - med) / med <= 0.05);
   const mean = used.reduce((s, h) => s + h.mmPerPx, 0) / used.length;
   return { mmPerPx: mean, used };
+}
+
+// ---------------- 自动找墙体颜色 ----------------
+
+/** 按颜色取墙体掩膜：与墙色的 RGB 差值之和小于 tol 的像素算墙 */
+export function wallMask(px: ArrayLike<number>, channels: 3 | 4, w: number, h: number, color: [number, number, number], tol = 54): Mask {
+  const data = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    const j = i * channels;
+    if (Math.abs(px[j] - color[0]) + Math.abs(px[j + 1] - color[1]) + Math.abs(px[j + 2] - color[2]) < tol) data[i] = 1;
+  }
+  return { w, h, data };
+}
+
+/**
+ * 候选墙色：户型图的墙一般是大面积的中性灰 / 深色。
+ * 统计偏灰像素的亮度分布，取占比最高、彼此不太接近的几种颜色。
+ */
+export function guessWallColors(px: ArrayLike<number>, channels: 3 | 4, w: number, h: number, max = 4): [number, number, number][] {
+  const bins = new Map<number, { n: number; r: number; g: number; b: number }>();
+  for (let y = 0; y < h; y += 2) {
+    for (let x = 0; x < w; x += 2) {
+      const j = (y * w + x) * channels;
+      const r = px[j];
+      const g = px[j + 1];
+      const b = px[j + 2];
+      if (Math.max(r, g, b) - Math.min(r, g, b) > 24) continue;
+      const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+      if (lum < 40 || lum > 205) continue;
+      const k = Math.round(lum / 10);
+      const e = bins.get(k) ?? { n: 0, r: 0, g: 0, b: 0 };
+      e.n++;
+      e.r += r;
+      e.g += g;
+      e.b += b;
+      bins.set(k, e);
+    }
+  }
+  const sorted = [...bins.entries()].sort((a, b) => b[1].n - a[1].n);
+  const out: [number, number, number][] = [];
+  const used: number[] = [];
+  for (const [k, e] of sorted) {
+    if (used.some((u) => Math.abs(u - k) <= 1)) continue;
+    used.push(k);
+    out.push([e.r / e.n, e.g / e.n, e.b / e.n]);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
+/** 依次用候选颜色识别，选分出房间最多（其次墙最长）的那一种 */
+export function autoDetectWalls(
+  px: ArrayLike<number>,
+  channels: 3 | 4,
+  w: number,
+  h: number,
+  o: DetectOptions,
+  roomCell: number,
+  minRoomAreaPx: number,
+): { color: [number, number, number]; walls: TraceWall[]; rooms: TraceRoom[] } | null {
+  let best: { color: [number, number, number]; walls: TraceWall[]; rooms: TraceRoom[]; score: number } | null = null;
+  for (const color of guessWallColors(px, channels, w, h)) {
+    const walls = bandsToWalls(detectBands(wallMask(px, channels, w, h, color), o), o);
+    if (walls.length < 3) continue;
+    const rooms = detectRooms(walls, w, h, roomCell, minRoomAreaPx);
+    const len = walls.reduce((s, x) => s + (x.a1 - x.a0), 0);
+    const score = rooms.length * 1e6 + len;
+    if (!best || score > best.score) best = { color, walls, rooms, score };
+  }
+  return best && best.rooms.length > 0 ? best : null;
 }
